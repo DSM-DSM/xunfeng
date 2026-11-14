@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>寻峰 · 从似然函数到牛顿法</title>
+<meta name="color-scheme" content="dark light" />
+<meta name="theme-color" content="#05070d" />
+<script>
+  // 样式生效前先定主题，避免闪白；?theme=light|dark 仅供本地调试。
+  (function () {
+    var q = new URLSearchParams(location.search).get('theme');
+    var sysLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+    document.documentElement.dataset.theme = q === 'light' || q === 'dark' ? q : (sysLight ? 'light' : 'dark');
+  })();
+</script>
+<link rel="stylesheet" href="./vendor/katex/katex.min.css" />
+<link rel="stylesheet" href="./lab.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M2.5 25.5 L11.5 8.5 L17 17.5 L21 11.5 L29.5 25.5 Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+        <circle cx="17" cy="6.4" r="2.1" fill="currentColor" />
+      </svg>
+      <div class="brand-text">
+        <span class="brand-cn">寻峰</span>
+        <span class="brand-sub">从似然函数到牛顿法 · Peak Seeking</span>
+      </div>
+    </div>
+
+    <div class="playbar" aria-label="播放控制">
+      <button type="button" id="playBtn" class="play-btn" title="连续走（Space）" aria-label="播放">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4l10 6-10 6z" fill="currentColor" /></svg>
+      </button>
+      <button type="button" id="stepBtn" class="step-btn" title="走一步">下一步</button>
+      <div class="kcount">k = <b id="kNum">0</b></div>
+      <span id="badge" class="badge" data-state="idle">待出发</span>
+      <span id="algoChip" class="algo-chip">纯牛顿</span>
+    </div>
+
+    <div class="top-actions">
+      <button type="button" class="icon-btn" id="helpBtn" title="重新打开说明" aria-label="帮助">?</button>
+      <button type="button" class="icon-btn" id="fsBtn" title="全屏（F）" aria-label="全屏">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V3h4M13 3h4v4M17 13v4h-4M7 17H3v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+      </button>
+      <a class="icon-btn home" href="./index.html" title="返回《寻峰》主站">返回主站</a>
+    </div>
+  </header>
+
+  <aside id="cards" aria-label="选择地形"></aside>
+
+  <main id="stage">
+    <div id="stage3d" aria-hidden="true">
+      <div id="sceneFormula">
+        <span class="sf-label">目标函数</span>
+        <span id="sceneFormulaBody"></span>
+      </div>
+      <div id="arrowTags">
+        <span class="atag tag-up"><span class="mx" data-tex="+\nabla f"></span> 最陡上坡</span>
+        <span class="atag tag-down"><span class="mx" data-tex="-\nabla f"></span> 最陡下坡</span>
+        <span class="atag tag-newton"><span class="mx" data-tex="-H^{-1}\nabla f"></span> 牛顿步</span>
+      </div>
+    </div>
+    <div id="logisticPanel" hidden>
+      <div class="lp-head">
+        <span>数据与决策边界</span>
+        <span class="lp-beta" id="lpBeta">β = (0.00, 0.00)</span>
+      </div>
+      <canvas id="scatter"></canvas>
+      <p class="lp-note" id="lpNote">左右两半：左边是山，右边是 24 个学生的数据。β 一动，分界线跟着转。</p>
+    </div>
+    <div id="sceneTag"><span id="presetName">正定二次碗</span><span id="presetTag">唯一极小</span></div>
+    <div id="sceneHud" aria-label="图上实时指标">
+      <div class="hud-item"><span class="hud-label">迭代 <span class="mx" data-tex="k"></span></span><b id="hudK">0</b></div>
+      <div class="hud-item"><span class="hud-label"><span class="mx" data-tex="f(x,y)"></span></span><b id="hudF">—</b></div>
+      <div class="hud-item"><span class="hud-label"><span class="mx" data-tex="\lvert\nabla f\rvert"></span></span><b id="hudG">—</b></div>
+    </div>
+    <div id="arrowLegend" aria-hidden="true">
+      <span><i class="sw warm"></i><span class="mx" data-tex="+\nabla f"></span> 最陡上坡</span>
+      <span><i class="sw rose"></i><span class="mx" data-tex="-\nabla f"></span> 最陡下坡</span>
+      <span><i class="sw accent"></i><span class="mx" data-tex="-H^{-1}\nabla f"></span> 牛顿步</span>
+      <span><i class="sw violet"></i>你走后的对比</span>
+    </div>
+    <div id="userBanner" hidden>
+      <b>轮到你了</b>
+      <span>用方向键选一个方向走一步；先只看梯度箭头，走完再对比牛顿会去哪。</span>
+    </div>
+    <div class="scene-vignette" aria-hidden="true"></div>
+  </main>
+
+  <aside id="controls" aria-label="实验控制">
+    <section class="block formula-block">
+      <div class="block-head">
+        <span class="block-title" id="formulaTitle">正定二次碗</span>
+        <span class="hbadge" id="hessBadge">正定 · 碗</span>
+      </div>
+      <p class="plain" id="presetPlain">四面八方都往上翘，所以碗底就是最低点。</p>
+      <div class="tabs" id="formulaTabs" role="tablist" aria-label="公式切换">
+        <button type="button" data-tab="f" class="active" role="tab" aria-selected="true"><span class="mx" data-tex="f"></span></button>
+        <button type="button" data-tab="grad" role="tab" aria-selected="false"><span class="mx" data-tex="\nabla f"></span></button>
+        <button type="button" data-tab="hess" role="tab" aria-selected="false"><span class="mx" data-tex="H"></span></button>
+        <button type="button" data-tab="iter" role="tab" aria-selected="false">迭代</button>
+      </div>
+      <div class="formula-body" id="formulaBody" role="tabpanel"></div>
+      <p class="behavior"><b>要点</b><span id="behaviorText">二次型上牛顿法一步收敛</span></p>
+      <p class="hess-plain" id="hessPlain">四面八方都向上翘：附近像碗底。</p>
+    </section>
+
+    <section class="block">
+      <div class="block-title">起点</div>
+      <div class="start-row">
+        <label for="startX" class="mx" data-tex="x_0"></label><input id="startX" type="number" step="0.1" />
+        <label for="startY" class="mx" data-tex="y_0"></label><input id="startY" type="number" step="0.1" />
+        <button type="button" id="resetStartBtn" title="回到默认起点">复位</button>
+      </div>
+      <p class="hint-line">也可以直接在山上拖小黄圈换起点。</p>
+    </section>
+
+    <section class="block">
+      <div class="block-title">算法</div>
+      <div class="seg algo" id="algoSeg" role="group" aria-label="算法">
+        <button type="button" data-algo="newton">纯牛顿</button>
+        <button type="button" data-algo="damped">带阻尼牛顿</button>
+        <button type="button" data-algo="gradient">梯度上升</button>
+      </div>
+      <div class="slider-row">
+        <label for="alpha">阻尼 α</label>
+        <input id="alpha" type="range" min="0.05" max="1" step="0.05" value="1" />
+        <output id="alphaOut">1.00</output>
+      </div>
+      <div class="slider-row">
+        <label for="speed">播放速度</label>
+        <input id="speed" type="range" min="0.5" max="3" step="0.1" value="1" />
+        <output id="speedOut">1.0×</output>
+      </div>
+    </section>
+
+    <section class="block">
+      <div class="block-title">显示</div>
+      <div class="toggles" id="toggles">
+        <label><input type="checkbox" data-tg="grad" checked />梯度箭头</label>
+        <label><input type="checkbox" data-tg="quad" checked />局部二次近似</label>
+        <label><input type="checkbox" data-tg="hess" />Hessian 椭圆</label>
+        <label><input type="checkbox" data-tg="contour" checked />曲面等高线</label>
+        <label><input type="checkbox" data-tg="trail" checked />迭代轨迹</label>
+      </div>
+      <div class="mode-row">
+        <button type="button" id="userModeBtn" class="btn-mode">我来走</button>
+        <button type="button" id="settleBtn" class="btn-ghost" hidden>结算对比</button>
+        <button type="button" id="swapStartBtn" class="btn-ghost">换起点</button>
+      </div>
+      <p class="caveat">牛顿法只找梯度为零处：鞍点也会停；非二次可能要很多步，甚至发散；结果依赖起点。</p>
+    </section>
+  </aside>
+
+  <footer id="bottom">
+    <div class="chart-wrap">
+      <canvas id="chart"></canvas>
+      <span class="chart-label"><span class="mx" data-tex="f"></span> 随迭代</span>
+      <span class="axis-f mx" id="axisF" data-tex="f" aria-hidden="true"></span>
+      <span class="axis-k mx" id="axisK" data-tex="k" aria-hidden="true"></span>
+    </div>
+    <ol class="narration">
+      <li><b>方向</b><span id="line1">还没出发。</span></li>
+      <li><b>按曲率</b><span id="line2">点「下一步」，这里会说出按弯曲程度能迈多远。</span></li>
+      <li><b>实际</b><span id="line3">实际走了多远、有没有被拦，也会写在这里。</span></li>
+    </ol>
+  </footer>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div class="intro" id="intro">
+  <div class="intro-card">
+    <div class="intro-kicker">寻峰 · 从似然函数到牛顿法</div>
+    <h1>在山上，怎么最快找到最高点或最低点？</h1>
+    <p class="intro-en">Peak Seeking — From Likelihood to Newton's Method</p>
+    <p>这里把二元函数画成一座山。小人每走一步，只看脚下的坡度和弯曲程度，然后直接猜下一步该跳到哪——这就是牛顿法。</p>
+    <div class="glossary">
+      <div><b>偏导</b>只让一个方向变化，另一个方向按住不动，函数变化有多快。</div>
+      <div><b>梯度 <span class="mx" data-tex="\nabla f"></span></b>把两个偏导装在一起，指向最陡的上坡方向。</div>
+      <div><b>Hessian <span class="mx" data-tex="H"></span></b>这个点往各个方向弯得有多厉害（二阶导数组成的 2×2 表）。</div>
+      <div><b>正定 / 负定 / 不定</b>各方向都向上翘 / 都向下弯 / 一上一下。</div>
+      <div><b>牛顿步</b>不是沿着梯度走，而是按曲率把方向掰一下：<span class="mx" data-tex="-H^{-1}\nabla f"></span>。图上的青色箭头和黄色箭头所以会分开。</div>
+    </div>
+    <p class="intro-warn">但牛顿法不是万能的：它只找梯度为零的驻点，鞍点也会停；非二次函数可能要很多步，甚至发散；结果还依赖起点。</p>
+    <div class="intro-actions">
+      <button type="button" class="btn-primary" id="introGo">全屏进入实验室</button>
+      <button type="button" class="btn-ghost" id="introClose">先看看</button>
+    </div>
+  </div>
+</div>
+
+<script src="./vendor/katex/katex.min.js"></script>
+<script type="module" src="./lab.js"></script>
+</body>
+</html>

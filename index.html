@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="color-scheme" content="dark light" />
+<title>寻峰 Peak Seeking · 从似然函数到牛顿法</title>
+<meta name="description" content="《寻峰》是一个面向零基础读者的教学型可视化作品：从似然函数出发，用一座可以走上去的似然曲面讲清最大似然估计与二元函数求极值的关系，并对比牛顿法与梯度上升。全部公式本地渲染，断网可用。" />
+<meta property="og:title" content="寻峰 Peak Seeking · 从似然函数到牛顿法" />
+<meta property="og:description" content="从似然函数到牛顿法：把对数似然求 MLE 画成一座可以走上去的山。" />
+<link rel="stylesheet" href="./vendor/katex/katex.min.css" />
+<link rel="stylesheet" href="./styles.css" />
+<link rel="stylesheet" href="./shell.css" />
+<script>
+/* 主题：先按系统偏好落 data-theme，避免首屏闪一下；手动选择后由 theme.js 接管记忆 */
+(function () {
+  try {
+    var saved = localStorage.getItem('ll-theme');
+    var light = window.matchMedia('(prefers-color-scheme: light)').matches;
+    document.documentElement.dataset.theme = saved || (light ? 'light' : 'dark');
+  } catch (e) {
+    document.documentElement.dataset.theme = 'dark';
+  }
+})();
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<nav id="rail" class="rail" aria-label="页面导航">
+  <div class="rail-head">
+    <span class="rail-logo" aria-hidden="true">峰</span>
+    <span class="rail-title">寻峰</span>
+    <button id="railToggle" class="rail-toggle" type="button" aria-expanded="true" aria-controls="railList" aria-label="收起导航">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg>
+    </button>
+  </div>
+  <ul id="railList" class="rail-list">
+    <li><a class="rail-link" href="#hero" data-spy="hero,app"><span class="rail-num">01</span><span class="rail-label">作品介绍</span></a></li>
+    <li><a class="rail-link" href="#mle" data-spy="mle"><span class="rail-num">02</span><span class="rail-label">MLE 与二元函数极值</span></a></li>
+    <li><a class="rail-link" id="railLab" data-spy="lab" data-lab-link><span class="rail-num">03</span><span class="rail-label">函数实验室</span><span class="rail-badge" hidden>建设中</span></a></li>
+    <li><a class="rail-link" href="#about" data-spy="about"><span class="rail-num">04</span><span class="rail-label">关于</span></a></li>
+  </ul>
+  <div class="rail-foot">
+    <button id="themeToggle" class="theme-toggle" type="button" aria-pressed="false">
+      <span class="theme-dot" aria-hidden="true"></span>
+      <span class="rail-label" id="themeLabel">深色</span>
+    </button>
+  </div>
+</nav>
+
+<section id="hero" class="shell-section hero" aria-labelledby="heroTitle">
+  <p class="eyebrow">RUC HACKATHON 2026 · 教学型可视化</p>
+  <h1 id="heroTitle" class="hero-title">寻峰 <span class="hero-en">Peak Seeking</span></h1>
+  <p class="hero-sub">从似然函数到牛顿法<span class="hero-sub-en">From Likelihood to Newton's Method</span></p>
+  <p class="audience">这是一个教学型网页：写给没学过似然函数、多元函数求极值、牛顿法的读者，从零开始讲。</p>
+  <p class="lede">把“这组参数有多配得上这批数据”画成一座山：山顶是最可能的参数，山壁有多陡决定估计有多准，山脚那颗粉色椭圆是误差范围。</p>
+  <blockquote class="thesis">似然曲面是单次观测的形状，<span class="tex" data-tex="n"></span> 个观测不改变山的形状，只把估计的椭圆缩小。</blockquote>
+  <div class="hero-actions">
+    <a class="cta cta-primary" href="#mle">先看讲解</a>
+    <a class="cta" id="heroLabLink" data-lab-link>函数实验室</a>
+  </div>
+  <ul class="facts">
+    <li><span class="fact-num">01</span><b>一座山</b>每个参数值对应一个高度：越像这批数据，山越高</li>
+    <li><span class="fact-num">02</span><b>一条判据</b>山顶是平的，而且四周都比它低</li>
+    <li><span class="fact-num">03</span><b>两条路</b>聪明的牛顿法一步到顶，笨的梯度上升要走两千步</li>
+  </ul>
+</section>
+
+<section id="mle" class="shell-section" aria-labelledby="mleTitle">
+  <header class="sec-head">
+    <p class="eyebrow">主线 · 三步看懂</p>
+    <h2 id="mleTitle">对数似然求 MLE</h2>
+    <p class="sec-lede">沿着三个问题走：为什么要找一个最大值、怎么确认它真是最大值、怎么最快走到那里。每一步都先用白话讲，再给公式。</p>
+  </header>
+
+  <article class="step">
+    <h3 class="step-title"><span class="step-num">一</span>为什么要找一个最大值</h3>
+    <p><b>似然</b>（likelihood）就是一串参数值“有多配得上这批数据”：参数定下来，数据出现的可能性就定了；可能性越大，似然越大。</p>
+    <p><b>最大似然估计</b>（MLE，Maximum Likelihood Estimate）就是挑出让似然最大的那个参数值——最配这批数据的那组数。</p>
+    <p>这里每个观测是平面上的一个点，模型是一个钟形的二元分布，待定的只有它的中心 <span class="tex" data-tex="\mu"></span>。把 <span class="tex" data-tex="n"></span> 个点的似然连乘、再取对数，就得到<b>对数似然</b> <span class="tex" data-tex="\log L(\mu)"></span>：乘法变加法，高度也方便画出来。</p>
+    <div class="formula" data-tex="\log L(\mu) = -\frac{n}{2}\log(2\pi) - \frac{n}{2}\log|\Sigma| - \frac{1}{2}\sum_{i=1}^{n}(x_i-\mu)^{\top} S (x_i-\mu),\qquad S=\Sigma^{-1}"></div>
+    <p class="gloss">逐项翻译：前两项是常数，和 <span class="tex" data-tex="\mu"></span> 选哪儿无关；随 <span class="tex" data-tex="\mu"></span> 变的只有最后一项——所有点到 <span class="tex" data-tex="\mu"></span> 的加权距离平方和。点离 <span class="tex" data-tex="\mu"></span> 越远，扣分越多，山越低。</p>
+    <p>把平方和整理一下，山的样子就清楚了：</p>
+    <div class="formula" data-tex="\log L(\mu) = -\frac{n}{2}(\mu-\bar{x})^{\top} S (\mu-\bar{x}) + \text{const}"></div>
+    <p class="gloss">人话翻译：这是一座开口朝下的碗，碗底正对着样本均值 <span class="tex" data-tex="\bar{x}"></span>。求 MLE，就是找碗底。</p>
+  </article>
+
+  <article class="step">
+    <h3 class="step-title"><span class="step-num">二</span>怎么知道它真是最大值</h3>
+    <p>站在碗底，往四周看都比脚下低。但“看起来低”不算证明，于是把它拆成两条可以验算的条件。</p>
+    <p><b>梯度</b>是一个箭头：指向“往哪个方向走，高度涨得最快”，箭头越长坡越陡。山顶是平的——往哪儿都不再变高，所以箭头长度为 0。</p>
+    <div class="formula" data-tex="\nabla\log L(\mu) = n S (\bar{x}-\mu) = 0"></div>
+    <p class="gloss">人话翻译：四周都平了，人就在山顶。整张平面上只有 <span class="tex" data-tex="\mu = \bar{x}"></span> 能满足。</p>
+    <p><b>Hessian</b> 是一张表，记的是“每个方向的坡度，再往前走时怎么变”。用它判山顶，看的是所有方向是不是都往下弯。</p>
+    <div class="formula" data-tex="\nabla^{2}\log L(\mu) = -n S \prec 0"></div>
+    <p class="gloss">人话翻译：“负定”（正定的反义词）就是无论朝哪个方向迈一步，高度都在掉——碗口朝下。所以这里是山顶，不是谷底，也不是马鞍。</p>
+    <p>两条都满足，结论唯一：<b><span class="tex" data-tex="\hat{\mu} = \bar{x}"></span></b>，样本均值就是最大似然估计。</p>
+    <p>这和<b>二元函数求极值</b>是同一件事：<span class="tex" data-tex="f(x, y)"></span> 的极大值点也要 <span class="tex" data-tex="\nabla f = 0"></span>、Hessian 负定；把 <span class="tex" data-tex="f"></span> 换成 <span class="tex" data-tex="\log L"></span>，判据一字不差。</p>
+  </article>
+
+  <article class="step">
+    <h3 class="step-title"><span class="step-num">三</span>怎么最快走到那里</h3>
+    <p>最笨的办法是<b>梯度上升</b>：每一步都朝最陡的上坡方向挪一小步，看到高度在涨就继续。方向永远没错，但步子小、弯路多；遇到又长又窄的山谷，要走两千多步。</p>
+    <p><b>牛顿法</b>多看了一眼曲率：不光知道哪边高，还知道坡弯得多厉害，于是直接算出终点在哪，一步跳过去。</p>
+    <div class="formula" data-tex="\mu \leftarrow \mu + I^{-1}\nabla\log L(\mu)"></div>
+    <p class="gloss">人话翻译：方向还是梯度指的上坡方向，但步长交给曲率决定。这里 <span class="tex" data-tex="\log L"></span> 恰好是碗形，牛顿法一步就落在 <span class="tex" data-tex="\bar{x}"></span>；演示里的两条路径，就是这两句话的动画。</p>
+    <p>曲率在这里有自己的名字：<b>Fisher 信息</b>，衡量“这座山有多尖”。山越尖，参数偏一点高度就掉很多，估计就越准。</p>
+    <div class="formula" data-tex="I(\mu) = -\nabla^{2}\log L(\mu) = nS"></div>
+    <p class="gloss">人话翻译：信息量只由模型和样本量 n 决定，跟小人站在哪里无关——整座山每一处的弯曲程度都一样。</p>
+    <p>估计的误差也用同一套曲率算：<b>CRLB</b>（克拉美–罗下界）是误差能做到的最小值。</p>
+    <div class="formula" data-tex="\mathrm{CRLB} = \Sigma / n"></div>
+    <p class="gloss">人话翻译：<span class="tex" data-tex="1\sigma"></span> 椭圆的半轴是 <span class="tex" data-tex="\sqrt{\operatorname{eig}(\Sigma/n)}"></span>。<span class="tex" data-tex="n"></span> 变 4 倍，椭圆只缩一半：精度按 <span class="tex" data-tex="\sqrt{n}"></span> 提升。</p>
+  </article>
+
+  <div id="demoReveal" class="demo-reveal">
+    <p class="reveal-lede">把上面这些公式落到画面上，就是一座山：每个参数值对应一个高度，山顶就是答案。</p>
+    <div class="reveal-actions">
+      <a id="startBtn" class="cta cta-primary" href="#demoStage">跳转到演示区</a>
+      <span class="reveal-hint">按 WASD / 方向键在山上走，也可以让两种算法各爬一次。</span>
+    </div>
+    <div id="demoStage" class="demo-stage">
+<header class="demo-head">
+  <p class="eyebrow">主线 · 互动演示</p>
+  <h2>似然曲面</h2>
+  <p>拖动右侧滑块改模型，按 WASD / 方向键在山上走；山顶黄色十字是 <span class="tex" data-tex="\bar{x}"></span>，粉色椭圆是 <span class="tex" data-tex="1\sigma"></span> 置信椭圆。</p>
+</header>
+
+<div class="demo-formula">
+  <p class="demo-formula-title">图上这座山，就是下面这个函数</p>
+  <div class="formula" data-tex="L(\mu) = (2\pi)^{-n/2}\,\lvert\Sigma\rvert^{-1/2}\exp\!\left[-\frac{1}{2}\sum_{i=1}^{n}(x_i-\mu)^{\top}\Sigma^{-1}(x_i-\mu)\right]"></div>
+  <p class="gloss">逐项翻译：<span class="tex" data-tex="(2\pi)^{-n/2}\lvert\Sigma\rvert^{-1/2}"></span> 是归一化常数，只保证整座山下的体积为 1；指数里的求和是每个观测点 <span class="tex" data-tex="x_i"></span> 到 <span class="tex" data-tex="\mu"></span> 的加权距离平方，离得越远扣得越多，山越低。这就是后端（或断网时的本地模型）逐点算出来的 <span class="tex" data-tex="L(\mu)"></span>。</p>
+  <div class="formula" data-tex="h(\mu) = \left(\frac{L(\mu)}{L(\bar{x})}\right)^{1/n} = \exp\!\left[-\frac{1}{2}(\mu-\bar{x})^{\top}\Sigma^{-1}(\mu-\bar{x})\right]"></div>
+  <p class="gloss">画到屏幕上时，纵轴用的是 <span class="tex" data-tex="h(\mu)"></span>：把似然除以峰顶值、再开 <span class="tex" data-tex="n"></span> 次根，山顶固定为 1，且指数里的 <span class="tex" data-tex="n"></span> 正好被抵消——所以拉动 <span class="tex" data-tex="n"></span> 时山的形状不变，变的只是山脚那颗误差椭圆。</p>
+</div>
+
+<div id="app">
+  <header id="topbar">
+    <div class="mode-switch" id="modeSwitch">
+      <button type="button" data-mode="lik" class="active">似然 <span class="tex" data-tex="L(\mu)"></span> · 钟形山</button>
+      <button type="button" data-mode="log">对数似然 <span class="tex" data-tex="\log L(\mu)"></span> · 抛物碗</button>
+      <span class="axis-hint" title="这是单个观测的形状，n 不会改变它；n 改变的是下方那颗椭圆。">似然<span class="tex" data-tex="L^{1/n}"></span>（纵轴等比压缩）</span>
+    </div>
+
+    <div class="topbar-right">
+      <label class="follow">
+        <input type="checkbox" id="followChk" />
+        <span>跟随镜头</span>
+      </label>
+      <span id="status" class="status status-wait">连接中…</span>
+    </div>
+  </header>
+
+  <main id="stage"></main>
+
+  <aside id="panel">
+    <div class="panel-head">
+      <div class="panel-title">实时统计量</div>
+      <div class="panel-sub">赏景的人在看山，学统计的人在看曲率</div>
+    </div>
+
+    <section id="controls">
+      <div class="ctl-group">
+        <div class="ctl-title">模型参数</div>
+        <div class="ctl-row">
+          <label for="s1"><span class="tex" data-tex="\sigma_1"></span></label>
+          <input type="range" id="s1" min="0.3" max="3" step="0.05" value="1.5" />
+          <output id="s1out">1.500</output>
+        </div>
+        <div class="ctl-row">
+          <label for="s2"><span class="tex" data-tex="\sigma_2"></span></label>
+          <input type="range" id="s2" min="0.3" max="3" step="0.05" value="0.6" />
+          <output id="s2out">0.600</output>
+        </div>
+        <div class="ctl-row">
+          <label for="rho"><span class="tex" data-tex="\rho"></span></label>
+          <input type="range" id="rho" min="-0.95" max="0.95" step="0.05" value="0.35" />
+          <output id="rhoout">0.350</output>
+        </div>
+        <div class="ctl-row">
+          <label for="n"><span class="tex" data-tex="n"></span></label>
+          <input type="range" id="n" min="5" max="200" step="1" value="30" />
+          <output id="nout">30</output>
+        </div>
+      </div>
+
+      <div class="ctl-group">
+        <div class="ctl-title">登顶对决</div>
+        <div class="btn-row">
+          <button type="button" id="demoBtn" class="btn btn-primary">牛顿法 vs 梯度上升</button>
+        </div>
+        <div id="result" class="result">同样从你当前位置出发，看谁先到山顶。</div>
+      </div>
+
+      <div class="hint">
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / 方向键移动 ｜ 拖拽旋转 ｜ 滚轮缩放
+      </div>
+    </section>
+  </aside>
+
+  <div id="toast" class="toast"></div>
+
+  <div id="intro" class="intro">
+    <div class="intro-card">
+      <h2>在这座山上走一走</h2>
+      <p><b>你脚下这座山，是数据给出的似然曲面。</b>山顶那一组参数，最能解释你看到的这批点。</p>
+      <p><b>把山取对数，钟形会摊开成一只碗。</b>碗壁弯曲的程度，就是 Fisher 信息量。</p>
+      <p><b>碗越陡，参数估得越准；越平，误差椭圆越长。</b>拉一下 <span class="tex" data-tex="\sigma"></span> 和 <span class="tex" data-tex="n"></span>，看看山怎么变形。</p>
+      <button type="button" id="introClose" class="btn btn-primary">我知道了</button>
+    </div>
+  </div>
+</div>
+    </div>
+  </div>
+
+  <p class="bridge">把 <span class="tex" data-tex="\log L"></span> 换成任意一个二元函数 <span class="tex" data-tex="f(x, y)"></span>，这套判据和两条路径都原样成立。想自己摆一座山？去实验室。</p>
+</section>
+
+<section id="lab" class="shell-section" aria-labelledby="labTitle">
+  <header class="sec-head">
+    <p class="eyebrow">下一步</p>
+    <h2 id="labTitle">函数实验室</h2>
+    <p class="sec-lede">一个可以自己定义的二元函数沙盒：摆一座山，然后看两种方法分别怎么爬上去。</p>
+  </header>
+  <div class="lab-card">
+    <div class="lab-copy">
+      <h3>自己造一座山</h3>
+      <ul class="lab-list">
+        <li>输入自定义 <span class="tex" data-tex="f(x, y)"></span> 与起点，实时生成曲面与等高线</li>
+        <li>看 Hessian、特征值与曲率如何决定山谷的狭长程度</li>
+        <li>牛顿法与梯度上升并排对照，步数与轨迹逐帧可见</li>
+      </ul>
+      <p class="lab-status" id="labStatus" hidden>实验室正在建设中，入口暂未开放。</p>
+    </div>
+    <a class="cta cta-primary" id="labCta" data-lab-link>进入函数实验室</a>
+  </div>
+</section>
+
+<section id="about" class="shell-section" aria-labelledby="aboutTitle">
+  <header class="sec-head">
+    <p class="eyebrow">关于</p>
+    <h2 id="aboutTitle">关于这座山</h2>
+  </header>
+  <div class="about-grid">
+    <article class="card">
+      <h3>作品</h3>
+      <p>一个把“对数似然求 MLE”变成可走、可看、可对比的作品：似然曲面、Fisher 信息、置信椭圆与两条登顶路径，全部实时联动。</p>
+    </article>
+    <article class="card">
+      <h3>技术</h3>
+      <p>原生 ES Module + Three.js（本地 vendor）+ FastAPI；公式由本地 KaTeX 渲染，字体与样式全部随页面分发，无任何 CDN，断网可用。</p>
+    </article>
+    <article class="card">
+      <h3>玩法</h3>
+      <p>WASD / 方向键在山上走，拖拽旋转、滚轮缩放；左侧滑块改模型参数，点“牛顿法 vs 梯度上升”看两条路径同时出发。</p>
+    </article>
+    <article class="card">
+      <h3>一句话口径</h3>
+      <p>似然曲面是单次观测的形状，<span class="tex" data-tex="n"></span> 个观测不改变山的形状，只把估计的椭圆缩小。</p>
+    </article>
+  </div>
+  <footer class="site-foot">寻峰 Peak Seeking — From Likelihood to Newton's Method · 2026 RUC Hackathon</footer>
+</section>
+
+<script defer src="./vendor/katex/katex.min.js"></script>
+<script type="module" src="./src/shell.js"></script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
